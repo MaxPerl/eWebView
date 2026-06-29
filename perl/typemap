@@ -1,0 +1,43 @@
+char *								T_PV_OR_NULL
+const char *						T_PV_OR_NULL
+EvasObject *						T_EVAS_OBJECT
+EvasCanvas *						T_EVAS_OBJECT
+eWebView *							T_EVAS_OBJECT
+Eina_Bool							T_IV
+
+
+################################################################################
+INPUT
+# the difference to T_PTROBJ is
+# 1) if undef is passed instead of an Evas_Object and the derived structs,
+# then on the C Side we must have NULL instead of PL_Sv_undef!!!
+# otherwise we get the error "$var is not of type EvasObjectPtr"
+# 2) const is cut
+T_EVAS_OBJECT
+		if (!SvROK($arg)) {
+			$var = NULL;
+		}
+		else {
+			if (sv_derived_from($arg, \"${(my $ntt=$ntype)=~s/^const //g;\$ntt}\")) {
+				IV tmp = SvIV((SV*)SvRV($arg));
+				$var = INT2PTR($type,tmp);
+			}
+			else {
+				Perl_croak(aTHX_ \"%s: %s is not of type %s\",
+							${$ALIAS?\q[GvNAME(CvGV(cv))]:\qq[\"$pname\"]},
+							\"$var\", \"$ntype\");
+			}
+		}
+T_PV_OR_NULL
+	if (!SvPOK($arg)) {
+		$var = NULL;
+	}
+	else {
+		$var = ($type)SvPV_nolen($arg);
+	}
+################################################################################
+OUTPUT
+T_EVAS_OBJECT
+	sv_setref_pv($arg, \"${(my $ntt=$ntype)=~s/^const //g;\$ntt}\", (void*)$var);
+T_PV_OR_NULL
+	sv_setpv((SV*)$arg, $var);
