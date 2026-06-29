@@ -1,9 +1,10 @@
-char *								T_PV_OR_NULL
+char *							T_PV_OR_NULL
 const char *						T_PV_OR_NULL
 EvasObject *						T_EVAS_OBJECT
 EvasCanvas *						T_EVAS_OBJECT
-eWebView *							T_EVAS_OBJECT
-Eina_Bool							T_IV
+eWebView *						T_EVAS_OBJECT
+Eina_Bool						T_IV
+DownloadRequest *					T_PTROBJ
 
 
 ################################################################################

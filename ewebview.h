@@ -25,6 +25,12 @@ extern "C" {
 #  define EWEBVIEW_API __attribute__((visibility("default")))
 #endif
 
+typedef struct {
+    const char *uri;
+    const char *suggested_filename;
+} eWebView_DownloadRequest;
+
+
 /* ── Konstruktor ──────────────────────────────────────────────────────────── */
 EWEBVIEW_API Evas_Object *ewebview_add(Evas *evas);
 
@@ -53,14 +59,20 @@ EWEBVIEW_API void        ewebview_focus_set(Evas_Object *obj, Eina_Bool focused)
  * evas_object_smart_callback_add(wv, "load,started",  cb, data)
  * evas_object_smart_callback_add(wv, "load,finished", cb, data)
  * evas_object_smart_callback_add(wv, "load,progress", cb, data)  // event_info = double*
- * evas_object_smart_callback_add(wv, "download,started", cb, data) 
- *   → event_info = const char* (URI)
+ * evas_object_smart_callback_add(wv, "download,requested", cb, data) 
+ *   → event_info = eWebView_DownloadRequest
  * Important: Registered on the WebKitWeb context, not on the WebView; that is, if there are multiple
  *        instances, one would receive downloads from all of them; but in the typical case
  *        where there is only one instance, this shouldn't be a problem! One just have to be aware of it...  
  * Wichtig: am WebKitWeb Kontext registriert, nicht am WebView, d.h. bei mehreren
  *		Instanzen würde man Download von allen bekommen; für den Normalfall
  *		mit einer Instanz dürfte das aber kein Problem sein! Man muss es nur wissen...
+ * evas_object_smart_callback_add(wv, "download,finished", cb, data)  
+ * 	→ event_info = const char* (destination path / Zielpfad)
+ * evas_object_smart_callback_add(wv,"download,failed", cb, data)
+ * 	→ event_info = const char* (error message / Fehlermeldung)
+ * evas_object_smart_callback_add(wv, "print,requested", cb, data)
+ *   → event_info = NULL
  */
 
 #ifdef __cplusplus

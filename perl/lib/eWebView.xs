@@ -53,6 +53,19 @@ double
 ewebview_load_progress_get(obj);
 	eWebView *obj
 	
+const char *
+ewebview_download_uri_get(obj);
+	eWebView *obj
+
+void
+ewebview_download_save(obj, path)
+	eWebView *obj
+	const char *path
+
+void
+ewebview_download_cancel(obj);
+	eWebView *obj
+
 void
 ewebview_focus_set(obj, focused);
 	eWebView *obj

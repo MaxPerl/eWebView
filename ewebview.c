@@ -212,28 +212,54 @@ static void _on_uri_changed(WebKitWebView *wkv, GParamSpec *ps,
                                     (void*)sd->current_url);
 }
 
-/* ── Download-Callback ────────────────────────────────────────────────────── */
+/* ── Download-Callbacks ───────────────────────────────────────────────────── */
+
+static void _on_download_finished(WebKitDownload *download, gpointer userdata)
+{
+    Evas_Object *obj = (Evas_Object *)userdata;
+    WV_DATA_GET(obj, sd);
+    /* event_info = const char* mit dem Zielpfad wo die Datei liegt */
+    const char *dest = sd ? webkit_download_get_destination(download) : NULL;
+    evas_object_smart_callback_call(obj, "download,finished", (void*)dest);
+    /* Alle Signal-Handler dieses Downloads aufräumen */
+    g_signal_handlers_disconnect_by_data(download, userdata);
+}
+
+static void _on_download_failed(WebKitDownload *download,
+                                 GError *error, gpointer userdata)
+{
+    Evas_Object *obj = (Evas_Object *)userdata;
+    /* event_info = const char* mit der Fehlermeldung */
+    const char *msg = error ? error->message : "Unbekannter Fehler";
+    evas_object_smart_callback_call(obj, "download,failed", (void*)msg);
+    /* Alle Signal-Handler dieses Downloads aufräumen */
+    g_signal_handlers_disconnect_by_data(download, userdata);
+}
+
 /*
  * Wird aufgerufen wenn:
  *   - der User "Speichern" in der PDF-Toolbar drückt
  *   - ein nicht darstellbarer MIME-Type geladen wird (zip, exe, ...)
  *   - webkit_download_set_destination() nicht gesetzt wurde
  *
- * event_info im Evas Smart Callback: const char* mit der Download-URI
+ * Verfügbare Smart Callbacks:
+ *   "download,requested" → event_info = eWebView_DownloadRequest
+ *   "download,finished"  → event_info = const char* (Zielpfad)
+ *   "download,failed"    → event_info = const char* (Fehlermeldung)
  *
- * Der Aufrufer kann:
- *   - ewebview_download_uri_get() aufrufen um die URI zu holen
- *   - webkit_download_set_destination() via ewebview_download_set_destination()
- *   - oder den Download per ewebview_download_cancel() abbrechen
- *
- * Wir speichern das WebKitDownload-Objekt in sd->current_download damit
- * der Aufrufer darauf reagieren kann.
+ * "download,progress" kann später ergänzt werden wenn eine Fortschrittsanzeige
+ * gewünscht ist (notify::estimated-progress auf dem WebKitDownload-Objekt).
  */
-static void _on_download_started(WebKitWebContext *ctx,
-                                  WebKitDownload *download,
-                                  gpointer userdata)
+// Forward-Deklaration für das neue Signal
+static gboolean _on_decide_destination(WebKitDownload *download, 
+                                       gchar *suggested_filename, 
+                                       gpointer userdata);
+
+static void _on_download_started(WebKitNetworkSession *session,
+                                 WebKitDownload *download,
+                                 gpointer userdata)
 {
-    (void)ctx;
+    (void)session;
     Evas_Object *obj = (Evas_Object *)userdata;
     WV_DATA_GET(obj, sd);
     if (!sd) return;
@@ -243,9 +269,35 @@ static void _on_download_started(WebKitWebContext *ctx,
         g_object_unref(sd->current_download);
     sd->current_download = g_object_ref(download);
 
-    const char *uri = webkit_uri_request_get_uri(
-                          webkit_download_get_request(download));
-    evas_object_smart_callback_call(obj, "download,started", (void*)uri);
+    // Standard-Handler für Ende/Fehler
+    g_signal_connect(download, "finished", G_CALLBACK(_on_download_finished), obj);
+    g_signal_connect(download, "failed", G_CALLBACK(_on_download_failed), obj);
+
+    // HIER klinken wir uns ein, BEVOR WebKit den Pfad festlegt!
+    g_signal_connect(download, "decide-destination", 
+                     G_CALLBACK(_on_decide_destination), obj);
+}
+
+static gboolean _on_decide_destination(WebKitDownload *download, 
+                                       gchar *suggested_filename, 
+                                       gpointer userdata)
+{
+    //(void)suggested_filename;
+    Evas_Object *obj = (Evas_Object *)userdata;
+    
+    // Wir holen die URI des Downloads, um sie an Perl zu übergeben
+    const char *uri = webkit_uri_request_get_uri(webkit_download_get_request(download));
+
+    eWebView_DownloadRequest event_data;
+    event_data.uri = uri;
+    event_data.suggested_filename = suggested_filename;
+    
+    // Wir triggern deinen Perl Smart-Callback "download,started"
+    evas_object_smart_callback_call(obj, "download,requested", &event_data);
+
+    // WICHTIG: TRUE zurückgeben signalisiert WebKit, dass wir das Handling 
+    // übernehmen und die Destination asynchron via webkit_download_set_destination setzen!
+    return TRUE; 
 }
 
 /* ── Input ────────────────────────────────────────────────────────────────── */
@@ -557,8 +609,15 @@ static void _smart_add(Evas_Object *obj)
         // wir holen sie mit dem Ecore Timer _glib_pump; so funktioniert also die Integration in
         // unseren Evas/Elm_Mainloop!!!!
         
-        // Übergebe das FDO-Interface direkt an den Loader
-        wpe_loader_init("libWPEBackend-fdo-1.0.so.1");
+        // WPE Backend laden — der Soname wird zur Compile-Zeit über
+        // WPE_BACKEND_SONAME gesetzt (in meson.build via pkg-config ermittelt).
+        // Fallback auf den bekannten Namen wenn nicht definiert.
+        // So muss bei einer neuen wpebackend-fdo Version nur meson.build
+        // angepasst werden, nicht der Source-Code.
+        #ifndef WPE_BACKEND_SONAME
+        #  define WPE_BACKEND_SONAME "libWPEBackend-fdo-1.0.so.1"
+        #endif
+        wpe_loader_init(WPE_BACKEND_SONAME);
         // SHM initialisierung
         wpe_fdo_initialize_shm();
         _glib_pump = ecore_timer_add(0.005, _glib_pump_cb, NULL);
@@ -617,6 +676,7 @@ static void _smart_add(Evas_Object *obj)
     WebKitNetworkSession *session = webkit_web_view_get_network_session(sd->web_view);
     g_signal_connect(session, "download-started",
                  G_CALLBACK(_on_download_started), obj);
+
 }
 
 static void _smart_del(Evas_Object *obj)
@@ -803,12 +863,8 @@ EWEBVIEW_API void ewebview_download_save(Evas_Object *obj, const char *path)
 {
     WV_DATA_GET(obj, sd);
     if (!sd || !sd->current_download || !path) return;
-    /* file:// URI aus Dateipfad bauen */
-    char *uri = g_filename_to_uri(path, NULL, NULL);
-    if (uri) {
-        webkit_download_set_destination(sd->current_download, uri);
-        g_free(uri);
-    }
+
+    webkit_download_set_destination(sd->current_download,path);
 }
 
 EWEBVIEW_API void ewebview_download_cancel(Evas_Object *obj)

@@ -8,6 +8,7 @@ require Exporter;
 
 use pEFL::Evas;
 use pEFL::PLSide;
+use eWebView::DownloadRequest;
 
 our @ISA = qw(Exporter);
 
@@ -28,7 +29,7 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 require XSLoader;
 XSLoader::load('eWebView', $VERSION);
@@ -140,10 +141,10 @@ eWebView has the following smart events, you can register event handlers with C<
 =item* "load,progress"
 $event_info is void pointer with a double containing the URI; not implemented at the moment
 
-=item* "download,started" 
-$event_info is void pointer with a string containing the URI; convert it with C<pEFL::ev_info2s($event_info)>
+=item* "download,requested" 
+$event_info is void pointer to a eWebView_DownloadRequest struct; convert it with C<pEFL::ev_info2object($event_info, "eWebView::DownloadRequest")>
 
-=item* "print, requested"
+=item* "download, finished"
 
 =back
 

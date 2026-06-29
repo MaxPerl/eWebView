@@ -1,6 +1,8 @@
 Revision history for Perl extension eWebView.
 
 0.01  Sun Jun 28 16:18:16 2026
-	- original version; created by h2xs 1.23 with options
-		-x -c -A -n eWebView -b 5.6.0 ./ewebview.h
+	- initial version
+0.02
+	- Add support for download Functions and Callbacks
+	- Add eWebView::DownloadRequest (->access to eWebView_DownloadRequest struct!)
 

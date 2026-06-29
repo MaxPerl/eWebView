@@ -24,4 +24,5 @@ WriteMakefile(
     INC               => '-I. ' . $elm_pkg_info{'cflags'} . $evas_pkg_info{'cflags'} . $ewebview_pkg_info{'cflags'}, # e.g., '-I. -I/usr/include/other'
 	# Un-comment this if you add C files to link with later:
     # OBJECT            => '$(O_FILES)', # link all the C files too
+    XSMULTI => 1,
 );
