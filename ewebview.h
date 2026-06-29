@@ -61,8 +61,6 @@ EWEBVIEW_API void        ewebview_focus_set(Evas_Object *obj, Eina_Bool focused)
  * Wichtig: am WebKitWeb Kontext registriert, nicht am WebView, d.h. bei mehreren
  *		Instanzen würde man Download von allen bekommen; für den Normalfall
  *		mit einer Instanz dürfte das aber kein Problem sein! Man muss es nur wissen...
- * evas_object_smart_callback_add(wv, "print,requested", cb, data)
- *   → event_info = NULL
  */
 
 #ifdef __cplusplus
