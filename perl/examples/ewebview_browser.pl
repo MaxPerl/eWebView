@@ -206,7 +206,7 @@ sub _on_download_requested {
         my $dest = pEFL::ev_info2s($path);
         if ($dest) {
             print "Speichern nach: $dest\n";
-            $wv->download_save($dest);
+            $wv->download_set_destination($dest);
         } else {
             # Abbrechen gedrückt
             $wv->download_cancel();

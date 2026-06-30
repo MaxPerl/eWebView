@@ -905,7 +905,7 @@ EWEBVIEW_API const char *ewebview_download_uri_get(Evas_Object *obj)
                webkit_download_get_request(sd->current_download));
 }
 
-EWEBVIEW_API void ewebview_download_save(Evas_Object *obj, const char *path)
+EWEBVIEW_API void ewebview_download_set_destination(Evas_Object *obj, const char *path)
 {
     WV_DATA_GET(obj, sd);
     if (!sd || !sd->current_download || !path) return;

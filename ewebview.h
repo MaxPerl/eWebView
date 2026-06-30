@@ -46,7 +46,7 @@ EWEBVIEW_API double      ewebview_load_progress_get(Evas_Object *obj);
 
 /* ── Download ───────────────────────────────────────────────────────────── */
 EWEBVIEW_API const char *ewebview_download_uri_get(Evas_Object *obj);
-EWEBVIEW_API void        ewebview_download_save(Evas_Object *obj, const char *path);
+EWEBVIEW_API void        ewebview_download_set_destination(Evas_Object *obj, const char *path);
 EWEBVIEW_API void        ewebview_download_cancel(Evas_Object *obj);
 
 /* ── Fokus ────────────────────────────────────────────────────────────────── */

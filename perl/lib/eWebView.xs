@@ -58,7 +58,7 @@ ewebview_download_uri_get(obj);
 	eWebView *obj
 
 void
-ewebview_download_save(obj, path)
+ewebview_download_set_destination(obj, path)
 	eWebView *obj
 	const char *path
 
