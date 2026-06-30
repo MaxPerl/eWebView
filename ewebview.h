@@ -71,8 +71,6 @@ EWEBVIEW_API void        ewebview_focus_set(Evas_Object *obj, Eina_Bool focused)
  * 	→ event_info = const char* (destination path / Zielpfad)
  * evas_object_smart_callback_add(wv,"download,failed", cb, data)
  * 	→ event_info = const char* (error message / Fehlermeldung)
- * evas_object_smart_callback_add(wv, "print,requested", cb, data)
- *   → event_info = NULL
  */
 
 #ifdef __cplusplus

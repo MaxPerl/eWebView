@@ -1,12 +1,17 @@
+#! /usr/bin/env perl
+
+use strict;
+use warnings;
+
 use pEFL::Elm;
 use pEFL::Evas;
 use eWebView;
-use eWebView::DownloadRequest;
 use URI;
 
 my $url = "https://www.webkit.org";
 
 pEFL::Elm::init($#ARGV, \@ARGV);
+
 pEFL::Elm::policy_set(ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED);
 
 my $win = pEFL::Elm::Win->util_standard_add("ewebview-browser", "eWebView Browser");
@@ -73,8 +78,32 @@ $wv->size_hint_align_set(EVAS_HINT_FILL, EVAS_HINT_FILL);
 $wv->show();
 $box->pack_end($wv);
 
+my $hbox = pEFL::Elm::Box->add($box);
+$hbox->horizontal_set(1);
+$hbox->size_hint_weight_set(EVAS_HINT_EXPAND,0);
+$hbox->size_hint_align_set(EVAS_HINT_FILL,0);
+$box->pack_end($hbox);
+$hbox->show();
+	
+my $separator = pEFL::Elm::Separator->add($hbox);
+$separator->horizontal_set(1);
+$separator->size_hint_weight_set(EVAS_HINT_EXPAND,0);
+$separator->size_hint_align_set(0.5,0);
+$hbox->pack_end($separator);
+$separator->show();
+
+my $progress = pEFL::Elm::Progressbar->add($hbox);
+$progress->size_hint_weight_set(0.2,0);
+$progress->size_hint_align_set(EVAS_HINT_FILL,0);
+$progress->size_hint_max_set(350,-1);
+$progress->pulse_set(0); 
+$progress->value_set(0.0);
+$hbox->pack_end($progress);
+$progress->show();
+
 $wv->smart_callback_add("url,changed",   \&_on_wv_url_changed,   undef);
 $wv->smart_callback_add("title,changed", \&_on_wv_title_changed, undef);
+$wv->smart_callback_add("load,progress", \&_on_wv_load_progress, $progress);
 
 # ── Download Callbacks ─────────────────────────────────────────────────────
 $wv->smart_callback_add("download,requested",  \&_on_download_requested,  undef);
@@ -88,7 +117,6 @@ $win->smart_callback_add("delete,request", sub { print "Exiting\n" }, undef);
 pEFL::Elm::run();
 pEFL::Elm::shutdown();
 
-# ── Navigation ─────────────────────────────────────────────────────────────
 
 sub _on_url_activated {
     my ($data, $obj, $ei) = @_;
@@ -108,9 +136,14 @@ sub _on_entry_mouse_down {
     $obj->focus_set(1);
 }
 
-sub _on_back   { $wv->back }
-sub _on_fwd    { $wv->forward }
-sub _on_reload { $wv->reload }
+sub _on_back {
+	$wv->back;
+}
+
+sub _on_fwd {
+	$wv->forward;
+}
+
 
 sub _on_wv_url_changed {
     my ($data, $obj, $ei) = @_;
@@ -118,10 +151,20 @@ sub _on_wv_url_changed {
     $url_entry->entry_set($url) if $url;
 }
 
+sub _on_reload {
+	$wv->reload;
+}
+
 sub _on_wv_title_changed {
     my ($data, $obj, $ei) = @_;
     my $title = pEFL::ev_info2s($ei);
     $win->title_set($title) if $title;
+}
+
+sub _on_wv_load_progress {
+	my ($data, $obj, $ei) = @_;
+	my $progress = $obj->load_progress_get();
+	$data->value_set($progress);
 }
 
 # ── Download ───────────────────────────────────────────────────────────────

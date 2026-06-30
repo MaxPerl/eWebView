@@ -94,41 +94,73 @@ static void _on_export_shm_buffer(void *userdata,
     WV_DATA_GET(obj, sd);
     if (!sd) goto done;
  
+    // Hole den Shared-Memory-Puffer (SHM) von Wayland/WPE
     struct wl_shm_buffer *shm =
         wpe_fdo_shm_exported_buffer_get_shm_buffer(buffer);
     if (!shm) goto done;
- 
+
+    // Abmessungen des von WebKit gelieferten Bildes auslesen
     int sw     = wl_shm_buffer_get_width(shm);
     int sh     = wl_shm_buffer_get_height(shm);
-    int stride = wl_shm_buffer_get_stride(shm);
- 
-    // Pixel-Buffer neu allozieren wenn sich die Größe geändert hat.
-    // Wir verwalten den Buffer selbst — kein evas_object_image_data_get nötig,
-    // kein GL-Konflikt. Evas bekommt immer denselben Pointer via data_set.
+    int stride = wl_shm_buffer_get_stride(shm); 
+    
+    // Speichergröße berechnen (Evas benötigt hier den vollen Stride,
+    // (d.h. stride = Zeilenbreite inklusive Hardware-Padding!)
+    int buf_size = stride * sh;
+
+    // Pixel-Buffer neu allozieren, wenn sich die Größe geändert hat (Resize/Maximize)
     if (sw != sd->pixel_buf_w || sh != sd->pixel_buf_h) {
-        free(sd->pixel_buf);
-        sd->pixel_buf   = calloc((size_t)(sw * sh), 4);
+        
+        // WICHTIG FÜR ASYNCHRONES DOUBLE BUFFERING:
+        // CRASH-SCHUTZ: Alten Pointer merken, um ihn erst NACH der Umstellung verzögert zu löschen
+        void *old_buf = sd->pixel_buf;
+
+        // Neuen Speicher mit der vollen Stride-Größe reservieren
+        sd->pixel_buf = calloc((size_t)buf_size, 1);
+        
+        // Falls das System Out-of-Memory läuft (z.B. beim exzessiven Maximieren)
+        if (!sd->pixel_buf) {
+            sd->pixel_buf = old_buf; // Alten Puffer retten
+            goto done;
+        }
+
+        // Neue Dimensionen im Struktur-State abspeichern
         sd->pixel_buf_w = sw;
         sd->pixel_buf_h = sh;
+        
+        // Evas-Image-Objekt an die neuen Dimensionen anpassen
         evas_object_image_size_set(sd->img, sw, sh);
         evas_object_image_fill_set(sd->img, 0, 0, sw, sh);
+        
+        // Evas den neuen Pointer zuweisen. 
+        // Ab diesem Moment liest Evas bei neuen Frames nicht mehr aus der alten Adresse.
+        evas_object_image_data_set(sd->img, sd->pixel_buf);
+
+        // Jetzt kann der alte Puffer daher gefahrlos freigegeben werden
+        free(old_buf);
     }
  
     if (!sd->pixel_buf) goto done;
  
-    // Direkt in unseren Buffer kopieren — kein data_get nötig
+    // Zugriff auf den Wayland-Mesa-Speicher sperren und Pixel kopieren
     wl_shm_buffer_begin_access(shm);
     void *src = wl_shm_buffer_get_data(shm);
     if (src) {
-        int row = sw * 4;
+        int row = sw * 4; // Reine Pixel-Breite pro Zeile (RGBA = 4 Bytes)
+        
         if (stride == row) {
-            memcpy(sd->pixel_buf, src, (size_t)(sh * row));
+            // Optimierung: Wenn kein Padding vorliegt, alles in einem Rutsch kopieren
+            memcpy(sd->pixel_buf, src, (size_t)buf_size);
         } else {
-            for (int y = 0; y < sh; y++)
-                memcpy((uint8_t*)sd->pixel_buf + y*row,
-                       (uint8_t*)src + y*stride, (size_t)row);
+            // BEHOBEN: Auch das Ziel (sd->pixel_buf) muss mit 'stride' springen,
+            // da es oben mit 'buf_size' (= stride * sh) alloziiert wurde!
+            for (int y = 0; y < sh; y++) {
+                memcpy((uint8_t*)sd->pixel_buf + y * stride,
+                       (uint8_t*)src + y * stride, (size_t)row);
+            }
         }
-        // Buffer an Evas übergeben und Neuzeichnen anfordern
+        
+        // Puffer als modifiziert markieren und Neuzeichnen triggern
         evas_object_image_data_set(sd->img, sd->pixel_buf);
         evas_object_image_data_update_add(sd->img, 0, 0, sw, sh);
     }
@@ -140,8 +172,6 @@ done:
     wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer(
         sd ? sd->exportable : NULL, buffer);
 }
-
-
 
 /* ── WebKit Signal-Callbacks ──────────────────────────────────────────────── */
 static void _on_load_changed(WebKitWebView *wkv, WebKitLoadEvent ev,
@@ -731,6 +761,13 @@ static void _smart_move(Evas_Object *obj, Evas_Coord x, Evas_Coord y)
     evas_object_move(sd->img, x, y);
 }
 
+// _smart_resize macht nur zwei Dinge:
+//
+// 1. EFL-Geometrie aktualisieren (evas_object_resize(sd->img, ...)) — 
+// 	das ist reine UI-Skalierung, das Image-Widget wird größer/kleiner auf dem Bildschirm gezogen
+// 2. WPE über die neue Größe informieren (dispatch_set_size) — das löst bei WPE ein Re-Layout aus
+// Aber wichtig: Nichts an den Pixeldaten selbst anfassen!!!
+
 static void _smart_resize(Evas_Object *obj, Evas_Coord w, Evas_Coord h)
 {
     WV_DATA_GET(obj, sd);
@@ -739,8 +776,17 @@ static void _smart_resize(Evas_Object *obj, Evas_Coord w, Evas_Coord h)
     // über das Member-System skaliert wenn wir evas_object_resize aufrufen?
     sd->w = w; sd->h = h;
     evas_object_resize(sd->img, w, h);
-    evas_object_image_size_set(sd->img, w, h);
-    evas_object_image_fill_set(sd->img, 0, 0, w, h);
+
+    // WICHTIG: Hier auf keinen Fall schon Evas_Image an die neue Größe anpassen
+    // WPE hat noch gar kein Bild mit neuer Größe geliefert! Falls wir Evas hier bereits
+    //voreilig mitteilen würden, das Bild sei bereits groß, würde der asynchrone Render Thread
+    // von Evas beim Zeichnen über den kleinen Buffer hinausgehen => SIGSEGV!!!
+    //evas_object_image_size_set(sd->img, w, h);
+    //evas_object_image_fill_set(sd->img, 0, 0, w, h);
+    // KORREKTE LÖSUNG:
+    // hier nur UI-Skalierung, Speicher- und Grafik-Diemensionen werden aber erst angepasst
+    // wenn der passende Buffer von WPE in _on_export_shm_buffer angeliefert wird
+
     // WPE über neue Viewport-Größe informieren
     wpe_view_backend_dispatch_set_size(sd->wpe_backend, (uint32_t)w, (uint32_t)h);
 }
