@@ -51,7 +51,6 @@ typedef struct {
 
     // Geometrie
     int           x, y, w, h;
-    int           wv_focused;
 
     // Selbst verwalteter Pixelbuffer — verhindert GL-Modus in Evas.
     // Evas bekommt immer denselben Pointer, wir kopieren WPE-Frames hinein.
@@ -423,7 +422,7 @@ _canvas_key_down_wrapper_cb(void *data, Evas *e, Evas_Object *o, void *event_inf
     (void)o;
     Evas_Object *obj = data;
     WV_DATA_GET(obj, sd); if (!sd) return;
-    if (!sd->wv_focused) return;
+    if (!evas_object_focus_get(sd->clip)) return;
     _cb_key_down(obj, e, obj, event_info);
 }
 
@@ -433,7 +432,7 @@ _canvas_key_up_wrapper_cb(void *data, Evas *e, Evas_Object *o, void *event_info)
     (void)o;
     Evas_Object *obj = data;
     WV_DATA_GET(obj, sd); if (!sd) return;
-    if (!sd->wv_focused) return;
+    if (!evas_object_focus_get(sd->clip)) return;
     _cb_key_up(obj, e, obj, event_info);
 }
 
@@ -937,8 +936,8 @@ EWEBVIEW_API void ewebview_download_cancel(Evas_Object *obj)
 EWEBVIEW_API void ewebview_focus_set(Evas_Object *obj, Eina_Bool focused)
 {
     WV_DATA_GET(obj, sd);
-    if (!sd || sd->wv_focused == focused) return;
-    sd->wv_focused = focused;
+    if (!sd || evas_object_focus_get(sd->clip) == focused) return;
+    evas_object_focus_get(sd->clip) = focused;
 
     // Unser clip widget muss fokusiert werden oder defokusiert werden
     evas_object_focus_set(sd->clip,focused);
