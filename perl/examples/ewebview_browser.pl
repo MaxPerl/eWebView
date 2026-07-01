@@ -110,6 +110,10 @@ $wv->smart_callback_add("download,requested",  \&_on_download_requested,  undef)
 $wv->smart_callback_add("download,finished", \&_on_download_finished, undef);
 $wv->smart_callback_add("download,failed",   \&_on_download_failed,   undef);
 
+# --- CnP Callback --------------------------------------------------------------
+$wv->smart_callback_add("selected-text,requested", \&on_wpe_text_selected_smart_cb, $win);
+$wv->smart_callback_add("context-menu,requested", \&_on_perl_context_menu, $win);
+
 $win->show();
 $wv->url_set($url);
 $win->smart_callback_add("delete,request", sub { print "Exiting\n" }, undef);
@@ -252,3 +256,98 @@ sub _on_download_failed {
     $popup->part_content_set("button1", $btn);
     $popup->show();
 }
+
+########################################################################
+# CnP from WebView
+#######################################################################
+
+# DER SMART CALLBACK: Wird ausgeführt, wenn das Event "wv,clipboard,request" gefeuert wird
+sub on_wpe_text_selected_smart_cb {
+    my ($win, $wv, $event_info) = @_;
+
+    my $selected_text = pEFL::ev_info2s($event_info);
+    return if !$selected_text || length($selected_text) == 0;
+
+    # Direkt in die System-Zwischenablage
+    $wv->text_to_clipboard($selected_text);
+
+    my $notify = pEFL::Elm::Notify->add($win);
+    $notify->align_set(0.5, 1.0);   # unten mittig
+    $notify->timeout_set(2.0);      # verschwindet nach 2 Sekunden
+    $notify->allow_events_set(1);   # Klicks auf die WebView bleiben nutzbar
+
+    my $box = pEFL::Elm::Box->add($notify);
+    $box->size_hint_weight_set(1, 1);
+    $box->size_hint_align_set(-1, -1);
+    $box->horizontal_set(1);
+    $box->show();
+
+    my $icon = pEFL::Elm::Icon->add($box);
+    $icon->standard_set("edit-copy");
+    $icon->resizable_set(0, 0);
+    $box->pack_end($icon); $icon->show();
+
+    # Vorschau kürzen, damit der Toast nicht die halbe Seite einnimmt
+    my $preview = length($selected_text) > 40
+        ? substr($selected_text, 0, 40) . "…"
+        : $selected_text;
+
+    my $label = pEFL::Elm::Label->add($box);
+    $label->text_set("In Zwischenablage kopiert: \"$preview\"");
+    $box->pack_end($label); $label->show();
+
+    $notify->content_set($box);
+
+    # Nach Ablauf des Timeouts automatisch löschen
+    $notify->smart_callback_add("timeout", \&_toast_timeout_cb, $notify);
+
+    $notify->show();
+}
+
+sub _toast_timeout_cb {
+    my ($notify, $obj, $ev) = @_;
+    $notify->del();
+}
+
+
+sub _on_perl_context_menu {
+    my ($data, $obj, $event_info) = @_;
+    
+    my $ev = pEFL::ev_info2obj($event_info, "pEFL::Evas::Event::MouseDown");
+    # pEFL kennt dieses Struct in- und auswendig!
+    my $canvas = $ev->canvas;
+    my $x = $canvas->{x};
+    my $y = $canvas->{y};
+
+    my $ctxpopup = pEFL::Elm::Ctxpopup->add($obj);
+    $ctxpopup->smart_callback_add("dismissed", \&_dismissed_cb, undef);
+    item_new($ctxpopup, "Copy", "home", $obj);
+    $ctxpopup->move($x,$y);
+    $ctxpopup->show();
+}
+
+sub item_new {
+	my ($ctxpopup, $label, $icon, $obj) = @_;
+	
+	my $ic = pEFL::Elm::Icon->add($ctxpopup);
+	$ic->standard_set($icon);
+	$ic->resizable_set(0,0);
+	
+	return $ctxpopup->item_append($label, $ic, \&_ctxpopup_item_cb, $obj);
+}
+
+sub _dismissed_cb {
+	my ($data, $obj, $ev) = @_;
+	$obj->del();
+}
+
+sub _ctxpopup_item_cb {
+    my ($wv, $ctxpopup, $evinfo) = @_;
+    
+    my $selected = pEFL::ev_info2obj($evinfo, "pEFL::Elm::CtxpopupItem");
+    print "ctxpopup item selected: " . $selected->text_get() . "\n";
+    $ctxpopup->del();
+    # 1. Rufe deine C-Funktion auf, um den Text asynchron anzufordern
+    $wv->selected_text_request();
+}
+

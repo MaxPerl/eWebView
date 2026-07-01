@@ -19,13 +19,15 @@ glib        = dependency('glib-2.0')
 xkb         = dependency('xkbcommon')
 wayland     = dependency('wayland-server')
 
+wpe_platform = dependency('wpe-platform-1.0', required: false)
+
 # ── Shared Library ─────────────────────────────────────────────────────────
 ewebview_lib = library(
   'ewebview',                          # → libewebview.so
   'ewebview.c',
   dependencies : [
-    webkit, wpe, wpe_fdo,
-    elm, evas, ecore, ecore_input,
+    webkit, wpe, wpe_fdo, wpe_platform,
+    elm, evas, ecore, ecore_input, # <-- ecore_x hier in die Linker-Liste übergeben
     glib, xkb, wayland,
   ],
   c_args : [

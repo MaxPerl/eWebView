@@ -31,28 +31,10 @@ typedef struct {
 } eWebView_DownloadRequest;
 
 
-/* ── Konstruktor ──────────────────────────────────────────────────────────── */
+/* ### Konstruktor ########################################################### */
 EWEBVIEW_API Evas_Object *ewebview_add(Evas *evas);
 
-/* ── Navigation ───────────────────────────────────────────────────────────── */
-EWEBVIEW_API void        ewebview_url_set(Evas_Object *obj, const char *url);
-EWEBVIEW_API const char *ewebview_url_get(Evas_Object *obj);
-EWEBVIEW_API const char *ewebview_title_get(Evas_Object *obj);
-EWEBVIEW_API void        ewebview_back(Evas_Object *obj);
-EWEBVIEW_API void        ewebview_forward(Evas_Object *obj);
-EWEBVIEW_API void        ewebview_reload(Evas_Object *obj);
-EWEBVIEW_API void        ewebview_stop(Evas_Object *obj);
-EWEBVIEW_API double      ewebview_load_progress_get(Evas_Object *obj);
-
-/* ── Download ───────────────────────────────────────────────────────────── */
-EWEBVIEW_API const char *ewebview_download_uri_get(Evas_Object *obj);
-EWEBVIEW_API void        ewebview_download_set_destination(Evas_Object *obj, const char *path);
-EWEBVIEW_API void        ewebview_download_cancel(Evas_Object *obj);
-
-/* ── Fokus ────────────────────────────────────────────────────────────────── */
-EWEBVIEW_API void        ewebview_focus_set(Evas_Object *obj, Eina_Bool focused);
-
-/* ── Smart Callbacks ──────────────────────────────────────────────────────── */
+/* ### Smart Callbacks ####################################################### */
 /*
  * evas_object_smart_callback_add(wv, "url,changed",   cb, data)
  * evas_object_smart_callback_add(wv, "title,changed", cb, data)
@@ -71,7 +53,30 @@ EWEBVIEW_API void        ewebview_focus_set(Evas_Object *obj, Eina_Bool focused)
  * 	→ event_info = const char* (destination path / Zielpfad)
  * evas_object_smart_callback_add(wv,"download,failed", cb, data)
  * 	→ event_info = const char* (error message / Fehlermeldung)
- */
+ ############################################################################### */
+
+/* ### Navigation ############################################################## */
+EWEBVIEW_API void        ewebview_url_set(Evas_Object *obj, const char *url);
+EWEBVIEW_API const char *ewebview_url_get(Evas_Object *obj);
+EWEBVIEW_API const char *ewebview_title_get(Evas_Object *obj);
+EWEBVIEW_API void        ewebview_back(Evas_Object *obj);
+EWEBVIEW_API void        ewebview_forward(Evas_Object *obj);
+EWEBVIEW_API void        ewebview_reload(Evas_Object *obj);
+EWEBVIEW_API void        ewebview_stop(Evas_Object *obj);
+EWEBVIEW_API double      ewebview_load_progress_get(Evas_Object *obj);
+
+/* ### Focus ################################################################### */
+EWEBVIEW_API void        ewebview_focus_set(Evas_Object *obj, Eina_Bool focused);
+
+/* ### Download ################################################################ */
+EWEBVIEW_API const char *ewebview_download_uri_get(Evas_Object *obj);
+EWEBVIEW_API void        ewebview_download_set_destination(Evas_Object *obj, const char *path);
+EWEBVIEW_API void        ewebview_download_cancel(Evas_Object *obj);
+
+/* ### Copy & Paste ############################################################ */
+EWEBVIEW_API void ewebview_selected_text_request(Evas_Object *obj);
+EWEBVIEW_API void ewebview_text_to_clipboard(Evas_Object *obj, const char *text);
+EWEBVIEW_API void ewebview_clipboard_paste(Evas_Object *obj);
 
 #ifdef __cplusplus
 }

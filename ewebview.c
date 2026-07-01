@@ -28,7 +28,7 @@
 
 
 
-/* ── Private Instanzdaten ─────────────────────────────────────────────────── */
+/* ### Private Instanzdaten ##################################################### */
 typedef struct {
     // Pflichtfeld bei EVAS_SMART_CLIPPED: muss ERSTES Feld in der Struct sein!
     // EFL legt hier intern das Clipper-Rectangle ab. Wir nutzen es zusätzlich
@@ -67,13 +67,13 @@ typedef struct {
     WebKitDownload *current_download;
 } Wv_Data;
 
-/* ── Smart-Object Typ ─────────────────────────────────────────────────────── */
+/* ### Smart-Object Typ ######################################################################## */
 static Evas_Smart *_smart = NULL;
 
 #define WV_DATA_GET(obj, sd) \
     Wv_Data *sd = evas_object_smart_data_get(obj)
 
-/* ── GLib-Pump (einmalig pro Prozess) ────────────────────────────────────── */
+/* ### GLib-Pump (einmalig pro Prozess) ######################################################## */
 static Ecore_Timer *_glib_pump = NULL;
 static int          _instance_count = 0;
 
@@ -85,7 +85,7 @@ static Eina_Bool _glib_pump_cb(void *d)
     return ECORE_CALLBACK_RENEW;
 }
 
-/* ── SHM Frame-Callback ───────────────────────────────────────────────────── */
+/* ### SHM Frame-Callback ##################################################################### */
 static void _on_export_shm_buffer(void *userdata,
                                    struct wpe_fdo_shm_exported_buffer *buffer)
 {
@@ -172,7 +172,7 @@ done:
         sd ? sd->exportable : NULL, buffer);
 }
 
-/* ── WebKit Signal-Callbacks ──────────────────────────────────────────────── */
+/* ### WebKit Signal-Callbacks ################################################################### */
 static void _on_load_changed(WebKitWebView *wkv, WebKitLoadEvent ev,
                               gpointer userdata)
 {
@@ -241,30 +241,7 @@ static void _on_uri_changed(WebKitWebView *wkv, GParamSpec *ps,
                                     (void*)sd->current_url);
 }
 
-/* ── Download-Callbacks ───────────────────────────────────────────────────── */
-
-static void _on_download_finished(WebKitDownload *download, gpointer userdata)
-{
-    Evas_Object *obj = (Evas_Object *)userdata;
-    WV_DATA_GET(obj, sd);
-    /* event_info = const char* mit dem Zielpfad wo die Datei liegt */
-    const char *dest = sd ? webkit_download_get_destination(download) : NULL;
-    evas_object_smart_callback_call(obj, "download,finished", (void*)dest);
-    /* Alle Signal-Handler dieses Downloads aufräumen */
-    g_signal_handlers_disconnect_by_data(download, userdata);
-}
-
-static void _on_download_failed(WebKitDownload *download,
-                                 GError *error, gpointer userdata)
-{
-    Evas_Object *obj = (Evas_Object *)userdata;
-    /* event_info = const char* mit der Fehlermeldung */
-    const char *msg = error ? error->message : "Unbekannter Fehler";
-    evas_object_smart_callback_call(obj, "download,failed", (void*)msg);
-    /* Alle Signal-Handler dieses Downloads aufräumen */
-    g_signal_handlers_disconnect_by_data(download, userdata);
-}
-
+/* ### WebKit-Download-Callbacks ################################################################ */
 /*
  * Wird aufgerufen wenn:
  *   - der User "Speichern" in der PDF-Toolbar drückt
@@ -279,10 +256,16 @@ static void _on_download_failed(WebKitDownload *download,
  * "download,progress" kann später ergänzt werden wenn eine Fortschrittsanzeige
  * gewünscht ist (notify::estimated-progress auf dem WebKitDownload-Objekt).
  */
-// Forward-Deklaration für das neue Signal
+// Forward-Deklarationen für Download Signale (Registrierung in _on_download_started!)
 static gboolean _on_decide_destination(WebKitDownload *download, 
-                                       gchar *suggested_filename, 
-                                       gpointer userdata);
+					gchar *suggested_filename,
+					gpointer userdata);
+
+static void _on_download_finished(WebKitDownload *download, 
+					gpointer userdata);
+
+static void _on_download_failed(WebKitDownload *download,
+					GError *error, gpointer userdata);
 
 static void _on_download_started(WebKitNetworkSession *session,
                                  WebKitDownload *download,
@@ -329,7 +312,82 @@ static gboolean _on_decide_destination(WebKitDownload *download,
     return TRUE; 
 }
 
-/* ── Input ────────────────────────────────────────────────────────────────── */
+static void _on_download_finished(WebKitDownload *download, gpointer userdata)
+{
+    Evas_Object *obj = (Evas_Object *)userdata;
+    WV_DATA_GET(obj, sd);
+    /* event_info = const char* mit dem Zielpfad wo die Datei liegt */
+    const char *dest = sd ? webkit_download_get_destination(download) : NULL;
+    evas_object_smart_callback_call(obj, "download,finished", (void*)dest);
+    /* Alle Signal-Handler dieses Downloads aufräumen */
+    g_signal_handlers_disconnect_by_data(download, userdata);
+}
+
+static void _on_download_failed(WebKitDownload *download,
+                                 GError *error, gpointer userdata)
+{
+    Evas_Object *obj = (Evas_Object *)userdata;
+    /* event_info = const char* mit der Fehlermeldung */
+    const char *msg = error ? error->message : "Unbekannter Fehler";
+    evas_object_smart_callback_call(obj, "download,failed", (void*)msg);
+    /* Alle Signal-Handler dieses Downloads aufräumen */
+    g_signal_handlers_disconnect_by_data(download, userdata);
+}
+
+/* ### Copy & Paste ################################################################ */
+
+static void _js_copy_cb(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+    WebKitWebView *web_view = WEBKIT_WEB_VIEW(source_object);
+    GError *error = NULL;
+    
+    JSCValue *value = webkit_web_view_evaluate_javascript_finish(web_view, res, &error);
+    if (error) {
+        g_error_free(error);
+        return;
+    }
+
+    if (value && jsc_value_is_string(value)) {
+        gchar *selected_text = jsc_value_to_string(value);
+        
+        if (selected_text && strlen(selected_text) > 0) {
+            Evas_Object *obj = (Evas_Object *)user_data;
+            
+            // Feuert das Perl-Event ab
+WV_DATA_GET(obj, sd); if (!sd) return;
+            evas_object_smart_callback_call(obj, "selected-text,requested", selected_text);
+ewebview_focus_set(obj,1);
+            
+            // KORREKTUR: webkit_web_view_evaluate_javascript mit removeAllRanges HIER ENTFERNEN!
+        }
+        g_free(selected_text);
+    }
+}
+
+/* ### Context-Menu ############################################################################ */
+
+static gboolean _cb_context_menu_populate(WebKitWebView *web_view, WebKitContextMenu *context_menu, 
+                                         WebKitHitTestResult *hit_test_result, gpointer user_data)
+{
+    (void)web_view; (void)hit_test_result; (void)user_data;
+    
+    // 1. Alle Standard-Einträge (wie "Seite untersuchen" etc.) entfernen
+    webkit_context_menu_remove_all(context_menu);
+
+    // 2. Den "Kopieren"-Eintrag direkt aus den WebKit-Systemressourcen holen
+    WebKitContextMenuItem *copy_item = webkit_context_menu_item_new_from_stock_action(
+        WEBKIT_CONTEXT_MENU_ACTION_COPY);
+
+    // 3. Ins Menü einfügen
+    webkit_context_menu_append(context_menu, copy_item);
+
+    // TRUE sagt WebKit: "Wir haben das Menü angepasst, bitte so anzeigen!"
+    return TRUE; 
+}
+
+
+/* ### EVAS OBJECT EVENTS ############################################################# */
+/* ### Input ########################################################################## */
 
 // Wichtig: WPE erwartet X11 KeySyms, die von Evas gelieferten Keycodes müssen daher 
 // mit den X11 Keysm Konstanten aus xkbcommon gemappt werden 
@@ -362,14 +420,15 @@ static uint32_t _keyname_to_keysym(const char *k)
  *   r |= control   →  0b011  (Shift + Ctrl ein)
  *
  * WPE prüft empfangsseitig mit & (Bitwise AND) welche Modifier aktiv sind:
- *   if (modifiers & wpe_input_keyboard_modifier_shift) ...
+ *   if (modifiers & wpe_input_keyboard_modifier_shift)
  *
  * Vorteil: ein einziges uint32_t kann 32 Flags gleichzeitig halten.
  *
  * Wichtig: Modifier werden für Tastenkombinationen in der Webseite gebraucht:
  *   Shift+Tab    → rückwärts durch fokussierbare Elemente tabben
  *   Ctrl+C/V     → Copy/Paste in Webseiten
- *   Alt+Left     → Browser-Back per Tastatur
+ *   Alt+Left     → Browser-Back per Tastatur (das könnte mit EFL-Navigation in Konflikt
+ *			=> wird daher in künftigen Versionen entfernt!
  * Ohne Modifier-Übertragung würden diese Kombinationen nicht funktionieren.
  *
  * Evas liefert Modifier als opaken Evas_Modifier* Pointer — der einzige
@@ -392,10 +451,40 @@ void _cb_key_down(void *d, Evas *e, Evas_Object *o, void *ei)
     Evas_Object *obj = (Evas_Object *)d;
     WV_DATA_GET(obj, sd); if (!sd) return;
     Evas_Event_Key_Down *ev = ei;
+    
+    uint32_t mods = _modifiers(ev->modifiers);
+
+    // STRG + C: Copy selected text and call smart callback!
+    if ((mods & wpe_input_keyboard_modifier_control) && 
+        (strcmp(ev->key, "c") == 0 || strcmp(ev->key, "C") == 0)) 
+    {
+        webkit_web_view_evaluate_javascript(
+            WEBKIT_WEB_VIEW(sd->web_view), "window.getSelection().toString();",
+            -1, NULL, NULL, NULL, _js_copy_cb, obj);
+        return; // Nur das Kopieren fangen wir aktiv ab!
+    }
+
+    // STRG + V: Ignore at the moment ??? Really?? Also in HTML can be input fields
+    if ((mods & wpe_input_keyboard_modifier_control) && 
+        (strcmp(ev->key, "v") == 0 || strcmp(ev->key, "V") == 0)) 
+    {
+        // Wenn der Nutzer im elm_entry tippt, lassen wir Elementary die Arbeit machen.
+        // Wir schicken es NICHT an WPE und rufen kein ecore_evas_selection_get auf.
+        // Indem wir hier einfach NICHTS tun (oder das Event durchlassen),
+        // fügt das elm_entry den Text aus dem Evas-Clipboard fehlerfrei ein!
+        // -> Das gilt aber nur für elm_entry! Dieser Handler feuert nur, wenn
+        //    sd->clip (die WebView selbst) den Fokus hat, also der Web-Inhalt
+        //    das Ziel ist -> dafür brauchen wir jetzt aktives Einfügen:
+        ewebview_clipboard_paste(obj);
+        return; 
+    }
+    // 
+
+    // Alle anderen normalen Tasten wandern ganz regulär weiter ins WebView
     struct wpe_input_keyboard_event wev = {
         .time     = (uint32_t)(ecore_time_get() * 1000),
         .key_code = _keyname_to_keysym(ev->key),
-        .modifiers = _modifiers(ev->modifiers),
+        .modifiers = mods,
         .pressed  = true,
     };
     wpe_view_backend_dispatch_keyboard_event(sd->wpe_backend, &wev);
@@ -443,17 +532,24 @@ static void _cb_mouse_down(void *d, Evas *e, Evas_Object *o, void *ei)
     Evas_Object *obj = (Evas_Object *)d;
     WV_DATA_GET(obj, sd); if (!sd) return;
     Evas_Event_Mouse_Down *ev = ei;
-    /* Koordinaten relativ zum Smart Object */
+
+    if (ev->button == 3) {
+        // Wir reichen das originale Evas_Event_Mouse_Down-Struct an Perl weiter!
+        evas_object_smart_callback_call(obj, "context-menu,requested", ei);
+        return; // Event stoppen
+    }
+
+    // Normaler Linksklick läuft unverändert an WPE weiter...
     struct wpe_input_pointer_event wev = {
-        .type   = wpe_input_pointer_event_type_button,
-        .time   = (uint32_t)(ecore_time_get() * 1000),
-        .x      = ev->canvas.x - sd->x,
-        .y      = ev->canvas.y - sd->y,
-        .button = 1, .state = 1,
+        .type      = wpe_input_pointer_event_type_button,
+        .time      = (uint32_t)(ecore_time_get() * 1000),
+        .x         = ev->canvas.x - sd->x,
+        .y         = ev->canvas.y - sd->y,
+        .button    = 1, 
+        .state     = 1,
     };
     wpe_view_backend_dispatch_pointer_event(sd->wpe_backend, &wev);
-
-ewebview_focus_set(obj, EINA_TRUE);
+    ewebview_focus_set(obj, EINA_TRUE);
 }
 
 static void _cb_mouse_up(void *d, Evas *e, Evas_Object *o, void *ei)
@@ -462,12 +558,20 @@ static void _cb_mouse_up(void *d, Evas *e, Evas_Object *o, void *ei)
     Evas_Object *obj = (Evas_Object *)d;
     WV_DATA_GET(obj, sd); if (!sd) return;
     Evas_Event_Mouse_Up *ev = ei;
+
+    // Wir bestimmen, welcher Button geklickt wurde
+    uint32_t button = 1; // Standard: Links
+    if (ev->button == 3) {
+        button = 3; // 3 steht bei Evas und WPE für die rechte Maustaste
+    }
+
     struct wpe_input_pointer_event wev = {
-        .type   = wpe_input_pointer_event_type_button,
-        .time   = (uint32_t)(ecore_time_get() * 1000),
-        .x      = ev->canvas.x - sd->x,
-        .y      = ev->canvas.y - sd->y,
-        .button = 1, .state = 0,
+        .type      = wpe_input_pointer_event_type_button,
+        .time      = (uint32_t)(ecore_time_get() * 1000),
+        .x         = ev->canvas.x - sd->x,
+        .y         = ev->canvas.y - sd->y,
+        .button    = button, 
+        .state     = 0, // 0 = Released
     };
     wpe_view_backend_dispatch_pointer_event(sd->wpe_backend, &wev);
 }
@@ -478,21 +582,23 @@ static void _cb_mouse_move(void *d, Evas *e, Evas_Object *o, void *ei)
     Evas_Object *obj = (Evas_Object *)d;
     WV_DATA_GET(obj, sd); if (!sd) return;
     Evas_Event_Mouse_Move *ev = ei;
+
+    uint32_t modifiers = 0;
+    if (ev->buttons == 1) {
+        modifiers |= wpe_input_pointer_modifier_button1;
+    }
+
     struct wpe_input_pointer_event wev = {
-        .type   = wpe_input_pointer_event_type_motion,
-        .time   = (uint32_t)(ecore_time_get() * 1000),
-        .x      = ev->cur.canvas.x - sd->x,
-        .y      = ev->cur.canvas.y - sd->y,
-        .button = 0, .state = 0,
+        .type      = wpe_input_pointer_event_type_motion,
+        .time      = (uint32_t)(ecore_time_get() * 1000),
+        .x         = ev->cur.canvas.x - sd->x,
+        .y         = ev->cur.canvas.y - sd->y,
+        .button    = 0, // Bei Motion-Events erwartet WebKit hier oft 0
+        .state     = 0, // Zustand 0 (wird über modifiers geregelt)
+        .modifiers = modifiers,
     };
     wpe_view_backend_dispatch_pointer_event(sd->wpe_backend, &wev);
 }
-
-// Am Anfang der Datei (oder über CMake) prüfen wir, ob Elementary verfügbar ist.
-// Falls Sie die elementary.h inkludieren können, fügen Sie sie hier hinzu:
-#if HAS_ELEMENTARY
-#include <Elementary.h>
-#endif
 
 static void _cb_mouse_wheel(void *d, Evas *e, Evas_Object *o, void *ei)
 {
@@ -503,20 +609,20 @@ static void _cb_mouse_wheel(void *d, Evas *e, Evas_Object *o, void *ei)
 
     // 1. Standard-Fallbacks (Wenn kein Elementary genutzt wird)
     double scroll_factor = 20.0;
-    Eina_Bool natural = EINA_TRUE; // Standard: Natural Scrolling ("Finger hoch, Seite runter")
+    Eina_Bool thumbscroll = EINA_TRUE; // Standard: No thumbscroll / natural scroll
 
-    // 2. Echtes Auslesen der Enlightenment/Elm-Einstellungen (falls verfügbar)
+    // 2. Auslesen der Enlightenment/Elm-Einstellungen (falls verfügbar)
 #if HAS_ELEMENTARY
     // Wenn Elementary aktiv ist, überschreiben wir die Fallbacks mit den echten Werten
     //scroll_factor = elm_config_scroll_accel_factor_get() * 20.0;
-    natural = elm_config_scroll_thumbscroll_enabled_get();
+    thumbscroll = elm_config_scroll_thumbscroll_enabled_get();
 #endif
 
     // 3. Mathematische Delta-Berechnung für WebKit
     double wheel_delta = (double)ev->z * scroll_factor;
     
     // Vorzeichen-Korrektur für die WebKit-Richtung:
-    if (!natural) {
+    if (!thumbscroll) {
         wheel_delta = -wheel_delta; 
     }
 
@@ -553,15 +659,13 @@ static void _cb_mouse_wheel(void *d, Evas *e, Evas_Object *o, void *ei)
         
         // .y_axis: Das vertikale Scroll-Delta (Oben/Unten).
         // ev->direction == 0 bedeutet, das Mausrad/die Geste bewegt sich vertikal.
-        // Ein negativer Wert scrollt die Seite nach unten (Inhalt wandert hoch).
         .y_axis = (ev->direction == 0) ? wheel_delta : 0.0,
     };
-
 
     wpe_view_backend_dispatch_axis_event(sd->wpe_backend, (struct wpe_input_axis_event *)&wev);
 }
 
-
+/* ### Focus Watcher ############################################################################### */
 static void _canvas_focus_in_cb(void *data, Evas *e, void *event_info) {
     (void)e;
     Evas_Object *obj = (Evas_Object *)data;
@@ -573,12 +677,12 @@ static void _canvas_focus_in_cb(void *data, Evas *e, void *event_info) {
     // Um später den Fokus wieder an Elm zurückgeben zu können, müssen wir
     // das zuletzt fokussierte Elm_Object hier speichern. Andernfalls 
     // könnten wir nie wieder zu Elm und bspw. zur Adressbar zurückkehren
-    if (focused != my_ignored_widget) {
-        sd->focus_saved = focused;
+    if (focused != my_ignored_widget && evas_object_visible_get(focused)) {
+	sd->focus_saved = focused;
     }
 }
 
-/* ── Evas Smart Object Callbacks ──────────────────────────────────────────── */
+/* ### Evas Smart Object Callbacks ################################################################## */
 static void _smart_add(Evas_Object *obj)
 {
     // Wv_Data allozieren — Wichtig bei Clipped Smart Classes: clip_data muss das erste Feld sein
@@ -594,7 +698,7 @@ static void _smart_add(Evas_Object *obj)
 
     Evas *evas = evas_object_evas_get(obj);
 
-     // Image-Objekt = der eigentliche WebView!
+    // Image-Objekt = der eigentliche WebView!
     // Wir verwalten den Pixelbuffer selbst (sd->pixel_buf) damit Evas
     // immer im Software-Modus bleibt — auch wenn die GL-Engine aktiv ist.
     // Evas bekommt immer denselben Pointer via data_set; wir kopieren
@@ -687,24 +791,36 @@ static void _smart_add(Evas_Object *obj)
     sd->web_view = g_object_new(WEBKIT_TYPE_WEB_VIEW,
                                  "backend", wk_backend, NULL);
 
+    sd->web_view = g_object_new(WEBKIT_TYPE_WEB_VIEW,
+                                 "backend", wk_backend, NULL);
+
+    // CnP - Feature
+    WebKitSettings *settings = webkit_web_view_get_settings(WEBKIT_WEB_VIEW(sd->web_view));
+    if (settings) {
+        // Caret-Browsing reicht völlig aus, damit WebKit die Selektion erlaubt
+        webkit_settings_set_enable_caret_browsing(settings, TRUE);
+        //webkit_settings_set_enable_javascript_markup(settings, TRUE);
+    }
+    //
+
     // mit diesen Zeilen werden nun in unseren WebKit-Mainloop (s.o. läuft im UI-Thread und werden 
     // mit dem Timer glib_pump abgeholt) Callbacks für Ereignisse dieses WebKit_View-Objekts erstellt
     g_signal_connect(sd->web_view, "load-changed",
-                     G_CALLBACK(_on_load_changed), obj);
+			G_CALLBACK(_on_load_changed), obj);
     g_signal_connect(sd->web_view, "notify::estimated-load-progress",
-                     G_CALLBACK(_on_progress_changed), obj);
+			G_CALLBACK(_on_progress_changed), obj);
     g_signal_connect(sd->web_view, "notify::title",
-                     G_CALLBACK(_on_title_changed), obj);
+			G_CALLBACK(_on_title_changed), obj);
     g_signal_connect(sd->web_view, "notify::uri",
-                     G_CALLBACK(_on_uri_changed), obj);
+			G_CALLBACK(_on_uri_changed), obj);
+    g_signal_connect(sd->web_view, "context-menu", 
+			G_CALLBACK(_cb_context_menu_populate), obj);
 
-    /* Download: auf WebKitWebContext registrieren (nicht auf WebView) —
-     * der Context ist für alle Downloads zuständig unabhängig vom View */
-    // Früher: WebKitWebContext *ctx = webkit_web_view_get_context(sd->web_view);
-    // Heute:
-    WebKitNetworkSession *session = webkit_web_view_get_network_session(sd->web_view);
+    // Download: auf WebKitNetworkSession registrieren (nicht auf WebView) —
+    // der Context ist für alle Downloads zuständig unabhängig vom View *
+        WebKitNetworkSession *session = webkit_web_view_get_network_session(sd->web_view);
     g_signal_connect(session, "download-started",
-                 G_CALLBACK(_on_download_started), obj);
+                 	G_CALLBACK(_on_download_started), obj);
 
 }
 
@@ -766,7 +882,6 @@ static void _smart_move(Evas_Object *obj, Evas_Coord x, Evas_Coord y)
 // 	das ist reine UI-Skalierung, das Image-Widget wird größer/kleiner auf dem Bildschirm gezogen
 // 2. WPE über die neue Größe informieren (dispatch_set_size) — das löst bei WPE ein Re-Layout aus
 // Aber wichtig: Nichts an den Pixeldaten selbst anfassen!!!
-
 static void _smart_resize(Evas_Object *obj, Evas_Coord w, Evas_Coord h)
 {
     WV_DATA_GET(obj, sd);
@@ -793,7 +908,7 @@ static void _smart_resize(Evas_Object *obj, Evas_Coord w, Evas_Coord h)
 // _smart_show, _smart_hide, _smart_clip_set, _smart_clip_unset entfallen —
 // EVAS_SMART_CLIPPED übernimmt das automatisch für alle Smart-Member.
 
-/* ── Smart-Klasse registrieren ────────────────────────────────────────────── */
+/* ### Smart-Klasse registrieren ############################################################# */
 static void _smart_init(void)
 {
     if (_smart) return;
@@ -813,9 +928,9 @@ static void _smart_init(void)
     _smart = evas_smart_class_new(&sc);
 }
 
-/* ── Öffentliche API ──────────────────────────────────────────────────────── */
+/* ### Öffentliche API ###################################################################### */
 
-/* ── Konstruktor ──────────────────────────────────────────────────────────── */
+/* ### Konstruktor ########################################################################## */
 EWEBVIEW_API Evas_Object *ewebview_add(Evas *evas)
 {
     _smart_init();
@@ -823,7 +938,7 @@ EWEBVIEW_API Evas_Object *ewebview_add(Evas *evas)
     return obj;
 }
 
-/* ── Navigation ───────────────────────────────────────────────────────────── */
+/* ### Navigation ########################################################################## */
 EWEBVIEW_API void ewebview_url_set(Evas_Object *obj, const char *url)
 {
     WV_DATA_GET(obj, sd);
@@ -880,7 +995,55 @@ EWEBVIEW_API double ewebview_load_progress_get(Evas_Object *obj)
     return sd->load_progress;
 }
 
-/* ── Download API ─────────────────────────────────────────────────────────── */
+/* ### Focus ################################################################################# */
+
+// Fokus hat sich leider als ein sehr schwieriges Thema erwiesen, weil einerseits 
+// Tastatureingaben nicht an den WebView übergeben werden dürfen, wenn diese nicht 
+// fokussiert ist und wir andererseits aus dem WebView wieder herauskommen müssen 
+// (keine Ahnung warum das ohne Modifikationen nicht geht)
+// Lösung:
+// 	* wir speichern, ob der WebView fokussiert ist (nur dann geben wir 
+//	  Tastatureinaben an den WebView weiter
+//	* wir speichern das zuletzt fokussierte (Elm_)Widget mit einem Event
+//	  auf dem Canvas (s.o.). Hier müssen wir den Fokus dann ausdrücklich
+//	  wieder resetten und an dieses zuletzt fokussierte Widget weitergeben!
+//
+EWEBVIEW_API void ewebview_focus_set(Evas_Object *obj, Eina_Bool focused)
+{
+    WV_DATA_GET(obj, sd);
+    if (!sd || evas_object_focus_get(sd->clip) == focused) { 
+        return;
+    }
+    //sd->wv_focused = focused;
+
+    // Unser clip widget muss fokusiert werden oder defokusiert werden
+    evas_object_focus_set(sd->clip,focused);
+
+    // Important: Wenn Clip den Fokus verliert, müssen wir diesen auf dem alten 
+    // Widget wiederherstellen
+    if (!focused) {	    
+	evas_object_focus_set(sd->focus_saved, EINA_TRUE);
+    }
+    
+    // Das Fokus-Problem: activity_state darf nicht angefasst werden
+    // (killt Videos, blockiert X11-Fokus). Stattdessen simulieren wir
+    // focus/blur direkt per JavaScript im Dokument.
+    //
+    // Das informiert Webseiten-JS (Google-Suchfeld, etc.) korrekt
+    // ohne WPEs interne GStreamer-Pipeline zu stören.
+    //
+    // Merke: Nachdem wir den Fokus über focus saved wiederhergestellt haben und die
+    // Key_up und Key_Down Ereignisse nun nicht vom Evas, sondern vom Clip abfeuern (so 
+    // dass sie nie auch bspw. im url_entry landen) IST FOLGENDES NICHT MEHR ERFORDERLICH!!!
+    //const char *js = focused
+    //    ? "window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus'));"
+    //    : "window.dispatchEvent(new Event('blur'));  document.dispatchEvent(new Event('blur'));";
+
+    //webkit_web_view_evaluate_javascript(sd->web_view, js, -1,
+    //                                    NULL, NULL, NULL, NULL, NULL);
+}
+
+/* ### Download API ########################################################################## */
 
 // Diese Funktionen werden typischerweise im "download,started" Callback
 // aufgerufen um auf einen laufenden Download zu reagieren.
@@ -919,49 +1082,137 @@ EWEBVIEW_API void ewebview_download_cancel(Evas_Object *obj)
     webkit_download_cancel(sd->current_download);
 }
 
+/* ### Copy & Paste-API #################################################################### */
 
-/* ── Fokus ────────────────────────────────────────────────────────────────── */
+static char *_read_clipboard_text(void)
+{
+    static const char *cmds[] = {
+        "wl-paste --no-newline 2>/dev/null",
+        "xclip -selection clipboard -o 2>/dev/null",
+        "xsel --clipboard --output 2>/dev/null",
+        NULL
+    };
 
-// Fokus hat sich leider als ein sehr schwieriges Thema erwiesen, weil einerseits 
-// Tastatureingaben nicht an den WebView übergeben werden dürfen, wenn diese nicht 
-// fokussiert ist und wir andererseits aus dem WebView wieder herauskommen müssen 
-// (keine Ahnung warum das ohne Modifikationen nicht geht)
-// Lösung:
-// 	* wir speichern, ob der WebView fokussiert ist (nur dann geben wir 
-//	  Tastatureinaben an den WebView weiter
-//	* wir speichern das zuletzt fokussierte (Elm_)Widget mit einem Event
-//	  auf dem Canvas (s.o.). Hier müssen wir den Fokus dann ausdrücklich
-//	  wieder resetten und an dieses zuletzt fokussierte Widget weitergeben!
-//
-EWEBVIEW_API void ewebview_focus_set(Evas_Object *obj, Eina_Bool focused)
+    for (int i = 0; cmds[i]; i++) {
+        FILE *pipe = popen(cmds[i], "r");
+        if (!pipe) continue;
+
+        size_t cap = 4096, len = 0;
+        char *buf = malloc(cap);
+        if (!buf) { pclose(pipe); continue; }
+
+        size_t n;
+        while ((n = fread(buf + len, 1, cap - len, pipe)) > 0) {
+            len += n;
+            if (len == cap) {
+                cap *= 2;
+                char *tmp = realloc(buf, cap);
+                if (!tmp) { free(buf); buf = NULL; break; }
+                buf = tmp;
+            }
+        }
+        if (!buf) { pclose(pipe); continue; }
+        buf[len] = '\0';
+
+        // TODO: sauberer Exit-Status-Check via sys/wait.h (WIFEXITED/WEXITSTATUS),
+        // aktuell reicht uns "wir haben etwas gelesen" als Erfolgskriterium
+        pclose(pipe);
+        if (len > 0)
+            return buf; // Erfolg, dieses Tool hat funktioniert
+
+        free(buf);
+    }
+    return NULL; // kein Tool verfügbar oder Zwischenablage leer
+}
+
+static char *_js_string_escape(const char *text)
+{
+    GString *out = g_string_new("\"");
+    for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
+        switch (*p) {
+            case '\\': g_string_append(out, "\\\\"); break;
+            case '"':  g_string_append(out, "\\\""); break;
+            case '\n': g_string_append(out, "\\n");  break;
+            case '\r': g_string_append(out, "\\r");  break;
+            case '\t': g_string_append(out, "\\t");  break;
+            default:
+                if (*p < 0x20)
+                    g_string_append_printf(out, "\\u%04x", *p);
+                else
+                    g_string_append_c(out, *p);
+        }
+    }
+    g_string_append_c(out, '"');
+    return g_string_free(out, FALSE);
+}
+
+EWEBVIEW_API void ewebview_selected_text_request(Evas_Object *obj)
 {
     WV_DATA_GET(obj, sd);
-    if (!sd || evas_object_focus_get(sd->clip) == focused) return;
-    evas_object_focus_get(sd->clip) = focused;
+    if (!sd || !sd->web_view) return;
 
-    // Unser clip widget muss fokusiert werden oder defokusiert werden
-    evas_object_focus_set(sd->clip,focused);
-
-    // Important: Wenn Clip den Fokus verliert, müssen wir diesen auf dem alten 
-    // Widget wiederherstellen
-    if (!focused) {
-	    evas_object_focus_set(sd->focus_saved, EINA_TRUE);
-    }
-    
-    // Das Fokus-Problem: activity_state darf nicht angefasst werden
-    // (killt Videos, blockiert X11-Fokus). Stattdessen simulieren wir
-    // focus/blur direkt per JavaScript im Dokument.
-    //
-    // Das informiert Webseiten-JS (Google-Suchfeld, etc.) korrekt
-    // ohne WPEs interne GStreamer-Pipeline zu stören.
-    //
-    // Merke: Nachdem wir den Fokus über focus saved wiederhergestellt haben und die
-    // Key_up und Key_Down Ereignisse nun nicht vom Evas, sondern vom Clip abfeuern (so 
-    // dass sie nie auch bspw. im url_entry landen) IST FOLGENDES NICHT MEHR ERFORDERLICH!!!
-    //const char *js = focused
-    //    ? "window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('focus'));"
-    //    : "window.dispatchEvent(new Event('blur'));  document.dispatchEvent(new Event('blur'));";
-
-    //webkit_web_view_evaluate_javascript(sd->web_view, js, -1,
-    //                                    NULL, NULL, NULL, NULL, NULL);
+    webkit_web_view_evaluate_javascript(
+        WEBKIT_WEB_VIEW(sd->web_view), "window.getSelection().toString();",
+        -1, NULL, NULL, NULL, _js_copy_cb, obj);
 }
+
+EWEBVIEW_API void ewebview_text_to_clipboard(Evas_Object *obj, const char *text)
+{
+    (void)obj;
+    if (!text) return;
+
+    // Wir nutzen hier eine saubere, direkte System-Pipe an das Betriebssystem, um das Clipboard
+    // mit dem Text zu füllen. So sind wir weder von den EFL oder Evas Funktionen abhängig
+    // mit denen es nicht so recht funktionieren wollte
+    static const char *cmds[] = {
+        "wl-copy 2>/dev/null",
+        "xclip -selection clipboard 2>/dev/null",
+        "xsel -clipboard -input 2>/dev/null",
+        NULL
+    };
+
+    for (int i = 0; cmds[i]; i++) {
+        FILE *pipe = popen(cmds[i], "w");
+        if (!pipe) continue;
+        fprintf(pipe, "%s", text);
+        int status = pclose(pipe);
+        if (status == 0) return; // Erfolgreich, fertig
+    }
+
+    // Ultimatives Fallback über die Standard-X11-Engine, falls keine Tools da sind
+    fprintf(stderr, "[eWebView] Kein Clipboard-Tool gefunden (wl-copy/xclip/xsel).\n");
+}
+
+EWEBVIEW_API void ewebview_clipboard_paste(Evas_Object *obj)
+{
+    WV_DATA_GET(obj, sd);
+    if (!sd || !sd->web_view) return;
+
+    char *text = _read_clipboard_text();
+    if (!text) return; // Zwischenablage leer oder Tool fehlt
+
+    char *escaped = _js_string_escape(text);
+    free(text);
+
+    GString *script = g_string_new(NULL);
+    g_string_append_printf(script,
+        "(function(){"
+        "  var el = document.activeElement;"
+        "  if (!el) return false;"
+        "  var editable = el.isContentEditable || "
+        "    el.tagName === 'TEXTAREA' || "
+        "    (el.tagName === 'INPUT' && !el.readOnly && !el.disabled);"
+        "  if (!editable) return false;"
+        "  document.execCommand('insertText', false, %s);"
+        "  return true;"
+        "})();", escaped);
+
+    webkit_web_view_evaluate_javascript(
+        WEBKIT_WEB_VIEW(sd->web_view), script->str,
+        -1, NULL, NULL, NULL, NULL, NULL);
+
+    g_string_free(script, TRUE);
+    free(escaped);
+}
+
+

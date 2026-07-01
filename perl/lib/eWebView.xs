@@ -58,7 +58,7 @@ ewebview_download_uri_get(obj);
 	eWebView *obj
 
 void
-ewebview_download_set_destination(obj, path)
+ewebview_download_set_destination(obj, path);
 	eWebView *obj
 	const char *path
 
@@ -70,3 +70,12 @@ void
 ewebview_focus_set(obj, focused);
 	eWebView *obj
 	Eina_Bool focused
+
+void 
+ewebview_selected_text_request(obj);
+	eWebView *obj
+
+void
+ewebview_text_to_clipboard(obj, text)
+	eWebView *obj
+	const char *text
