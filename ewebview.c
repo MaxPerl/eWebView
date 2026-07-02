@@ -267,6 +267,29 @@ static void _on_download_finished(WebKitDownload *download,
 static void _on_download_failed(WebKitDownload *download,
 					GError *error, gpointer userdata);
 
+static gboolean _on_decide_policy(WebKitWebView *web_view,
+                                   WebKitPolicyDecision *decision,
+                                   WebKitPolicyDecisionType type,
+                                   gpointer userdata)
+{
+    (void)web_view; (void)userdata;
+
+    if (type != WEBKIT_POLICY_DECISION_TYPE_RESPONSE)
+        return FALSE; // Navigation-Actions normal weiterlaufen lassen
+
+    WebKitResponsePolicyDecision *rd = WEBKIT_RESPONSE_POLICY_DECISION(decision);
+
+    // Fall 1: Server sagt explizit "attachment" -> ist eigentlich schon
+    // automatisch abgedeckt, aber schadet nicht, es hier zu prüfen
+    // Fall 2: WebKit kann den MIME-Type schlicht nicht darstellen
+    if (!webkit_response_policy_decision_is_mime_type_supported(rd)) {
+        webkit_policy_decision_download(decision);
+        return TRUE; // wir übernehmen die Entscheidung
+    }
+
+    return FALSE; // sonst: normal anzeigen (z.B. HTML, Bilder, PDF via eurem Viewer)
+}
+
 static void _on_download_started(WebKitNetworkSession *session,
                                  WebKitDownload *download,
                                  gpointer userdata)
@@ -816,7 +839,13 @@ static void _smart_add(Evas_Object *obj)
     g_signal_connect(sd->web_view, "context-menu", 
 			G_CALLBACK(_cb_context_menu_populate), obj);
 
-    // Download: auf WebKitNetworkSession registrieren (nicht auf WebView) —
+    // Download 1:
+    // Zunächst muss WebKit im decide-policy Signal gesagt werden, ob und bei welchen Dateien der 
+    // der Download überhaupt gestartet werden soll
+    g_signal_connect(sd->web_view, "decide-policy",
+			G_CALLBACK(_on_decide_policy), obj);
+
+    // Download 2: auf WebKitNetworkSession registrieren (nicht auf WebView) —
     // der Context ist für alle Downloads zuständig unabhängig vom View *
     WebKitNetworkSession *session = webkit_web_view_get_network_session(sd->web_view);
     g_signal_connect(session, "download-started",
