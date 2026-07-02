@@ -354,9 +354,9 @@ static void _js_copy_cb(GObject *source_object, GAsyncResult *res, gpointer user
             Evas_Object *obj = (Evas_Object *)user_data;
             
             // Feuert das Perl-Event ab
-WV_DATA_GET(obj, sd); if (!sd) return;
+            WV_DATA_GET(obj, sd); if (!sd) return;
             evas_object_smart_callback_call(obj, "selected-text,requested", selected_text);
-ewebview_focus_set(obj,1);
+            ewebview_focus_set(obj,1);
             
             // KORREKTUR: webkit_web_view_evaluate_javascript mit removeAllRanges HIER ENTFERNEN!
         }
@@ -818,7 +818,7 @@ static void _smart_add(Evas_Object *obj)
 
     // Download: auf WebKitNetworkSession registrieren (nicht auf WebView) —
     // der Context ist für alle Downloads zuständig unabhängig vom View *
-        WebKitNetworkSession *session = webkit_web_view_get_network_session(sd->web_view);
+    WebKitNetworkSession *session = webkit_web_view_get_network_session(sd->web_view);
     g_signal_connect(session, "download-started",
                  	G_CALLBACK(_on_download_started), obj);
 
@@ -1183,36 +1183,73 @@ EWEBVIEW_API void ewebview_text_to_clipboard(Evas_Object *obj, const char *text)
     fprintf(stderr, "[eWebView] Kein Clipboard-Tool gefunden (wl-copy/xclip/xsel).\n");
 }
 
+#include <Ecore.h>
+
+// Transportstruktur für die Thread-Daten
+typedef struct {
+    Evas_Object *obj;
+    char *text;
+} Paste_Request;
+
+// 1. Dieser Teil läuft im Hintergrund-Thread (Kein Einfrieren!)
+static void _clipboard_paste_thread_cb(void *data, Ecore_Thread *thread)
+{
+    (void) thread;
+    Paste_Request *pr = data;
+    // popen blockiert hier – das stört das Hauptprogramm aber nicht mehr.
+    pr->text = _read_clipboard_text(); 
+}
+
+// 2. Dieser Teil läuft automatisch wieder im Haupt-Thread (UI-sicher)
+static void _clipboard_paste_end_cb(void *data, Ecore_Thread *thread)
+{
+    (void) thread;
+    Paste_Request *pr = data;
+    WV_DATA_GET(pr->obj, sd);
+
+    // Prüfen, ob WebView noch existiert und Text gefunden wurde
+    if (sd && sd->web_view && pr->text) {
+        char *escaped = _js_string_escape(pr->text);
+
+        GString *script = g_string_new(NULL);
+        g_string_append_printf(script,
+            "(function(){"
+            "  var el = document.activeElement;"
+            "  if (!el) return false;"
+            "  var editable = el.isContentEditable || "
+            "    el.tagName === 'TEXTAREA' || "
+            "    (el.tagName === 'INPUT' && !el.readOnly && !el.disabled);"
+            "  if (!editable) return false;"
+            "  document.execCommand('insertText', false, %s);"
+            "  return true;"
+            "})();", escaped);
+
+        webkit_web_view_evaluate_javascript(
+            WEBKIT_WEB_VIEW(sd->web_view), script->str,
+            -1, NULL, NULL, NULL, NULL, NULL);
+
+        g_string_free(script, TRUE);
+        free(escaped);
+    }
+
+    if (pr->text) free(pr->text);
+    free(pr); // Speicher aufräumen
+}
+
+// Deine angepasste API-Funktion
 EWEBVIEW_API void ewebview_clipboard_paste(Evas_Object *obj)
 {
     WV_DATA_GET(obj, sd);
     if (!sd || !sd->web_view) return;
 
-    char *text = _read_clipboard_text();
-    if (!text) return; // Zwischenablage leer oder Tool fehlt
+    Paste_Request *pr = calloc(1, sizeof(Paste_Request));
+    if (!pr) return;
+    
+    pr->obj = obj;
 
-    char *escaped = _js_string_escape(text);
-    free(text);
-
-    GString *script = g_string_new(NULL);
-    g_string_append_printf(script,
-        "(function(){"
-        "  var el = document.activeElement;"
-        "  if (!el) return false;"
-        "  var editable = el.isContentEditable || "
-        "    el.tagName === 'TEXTAREA' || "
-        "    (el.tagName === 'INPUT' && !el.readOnly && !el.disabled);"
-        "  if (!editable) return false;"
-        "  document.execCommand('insertText', false, %s);"
-        "  return true;"
-        "})();", escaped);
-
-    webkit_web_view_evaluate_javascript(
-        WEBKIT_WEB_VIEW(sd->web_view), script->str,
-        -1, NULL, NULL, NULL, NULL, NULL);
-
-    g_string_free(script, TRUE);
-    free(escaped);
+    // Startet die asynchrone Kette über die EFL Pipeline
+    ecore_thread_run(_clipboard_paste_thread_cb, _clipboard_paste_end_cb, NULL, pr);
 }
+
 
 

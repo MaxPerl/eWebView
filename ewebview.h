@@ -43,16 +43,21 @@ EWEBVIEW_API Evas_Object *ewebview_add(Evas *evas);
  * evas_object_smart_callback_add(wv, "load,progress", cb, data)  // event_info = double*
  * evas_object_smart_callback_add(wv, "download,requested", cb, data) 
  *   → event_info = eWebView_DownloadRequest
- * Important: Registered on the WebKitWeb context, not on the WebView; that is, if there are multiple
+ * Important: Registered on the WebKitNetworkSession, not on the single WebView; that is, if there are multiple
  *        instances, one would receive downloads from all of them; but in the typical case
  *        where there is only one instance, this shouldn't be a problem! One just have to be aware of it...  
- * Wichtig: am WebKitWeb Kontext registriert, nicht am WebView, d.h. bei mehreren
+ * Wichtig: An der WebKitNetworkSession registriert, nicht am WebView, d.h. bei mehreren
  *		Instanzen würde man Download von allen bekommen; für den Normalfall
  *		mit einer Instanz dürfte das aber kein Problem sein! Man muss es nur wissen...
  * evas_object_smart_callback_add(wv, "download,finished", cb, data)  
  * 	→ event_info = const char* (destination path / Zielpfad)
  * evas_object_smart_callback_add(wv,"download,failed", cb, data)
  * 	→ event_info = const char* (error message / Fehlermeldung)
+ * evas_object_smart_callback_add(wv, "selected-text,requested", cb, data)
+ *	→ event_info = gchar *selected_text
+ * evas_object_smart_callback_add(wv, "context-menu,requested", cb, data)
+ *	→ event_info = Evas_Event_Mouse_Down *ev
+ *
  ############################################################################### */
 
 /* ### Navigation ############################################################## */
